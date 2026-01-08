@@ -13,6 +13,7 @@ setup(
         ('share/' + package_name + '/launch', [
             'launch/view_cobot_camera.launch.py',
             'launch/spawn_cobot_camera.launch.py',
+            'launch/spawn_cobot_camera_moveit.launch.py',
         ]),
         ('share/' + package_name + '/config', [
             'config/cobot_controllers.yaml',
