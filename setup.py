@@ -14,10 +14,13 @@ setup(
             'launch/view_cobot_camera.launch.py',
             'launch/spawn_cobot_camera.launch.py',
             'launch/spawn_cobot_camera_moveit.launch.py',
+            'launch/view_cobot_camera_gripper.launch.py',
+            'launch/spawn_cobot_camera_gripper.launch.py',
         ]),
         ('share/' + package_name + '/config', [
             'config/cobot_controllers.yaml',
             'config/initial_position.yaml',
+            'config/cobot_controllers_gripper.yaml',
         ]),
     ],
     install_requires=['setuptools'],
