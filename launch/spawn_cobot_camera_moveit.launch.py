@@ -6,7 +6,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.event_handlers import OnProcessStart
 from launch.event_handlers import OnProcessExit
 from launch.events import TimerEvent
-from launch.actions import TimerAction
+from launch.actions import TimerAction, ExecuteProcess
 from ament_index_python.packages import get_package_share_directory
 import os
 import xacro
@@ -16,6 +16,7 @@ from moveit_configs_utils import MoveItConfigsBuilder
 def generate_launch_description():
     ld = LaunchDescription()
 
+    use_sim_time = {"use_sim_time": True}
 
     joint_controllers_file = os.path.join(
         get_package_share_directory('cobot_bringup'), 'config', 'cobot_controllers.yaml'
@@ -51,7 +52,7 @@ def generate_launch_description():
             'use_sim_time': 'true',
             'debug': 'false',
             'gui': 'true',
-            'paused': 'true',
+            'paused': 'false',  # true can keep ros2_control/Gazebo hardware from ticking properly
             #'world' : world_file
         }.items()
     )
@@ -73,39 +74,30 @@ def generate_launch_description():
             moveit_config.robot_description_semantic,
             moveit_config.planning_pipelines,
             moveit_config.robot_description_kinematics,
+            use_sim_time,
         ],
     )
 
-    # spawn the robot
+    # spawn the robot (with increased timeout)
     spawn_the_robot = Node(
         package='gazebo_ros',
         executable='spawn_entity.py',
         arguments=[
             '-entity', 'cobot',
             '-topic', 'robot_description',
+            '-timeout', '120',
             '-x', LaunchConfiguration('x'),
             '-y', LaunchConfiguration('y'),
             '-z', LaunchConfiguration('z')
         ],
         output='screen',
     )
-
-    # controller manager
-    controller_manager_node = Node(
-        package='controller_manager',
-        executable='ros2_control_node',
-        parameters=[moveit_config.robot_description, joint_controllers_file],
-        output='screen',
-        remappings=[
-            ("~/robot_description", "/robot_description"),
-        ],
-    )
-
+    
     # Robot state publisher
     robot_state_publisher = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
-        parameters=[moveit_config.robot_description],
+        parameters=[moveit_config.robot_description, use_sim_time],
         output='screen'
     )
 
@@ -114,6 +106,7 @@ def generate_launch_description():
         executable="spawner",
         arguments=["joint_state_broadcaster", "--controller-manager", "/controller_manager"],
         output="screen",
+        parameters=[use_sim_time],
     )
 
     arm_trajectory_controller_spawner = Node(
@@ -121,6 +114,7 @@ def generate_launch_description():
         executable="spawner",
         arguments=["joint_trajectory_controller", "--controller-manager", "/controller_manager"],
         output="screen",
+        parameters=[use_sim_time],
     )
 
     use_sim_time={"use_sim_time": True}
@@ -131,22 +125,22 @@ def generate_launch_description():
         package="moveit_ros_move_group",
         executable="move_group",
         output="screen",
-        parameters=[config_dict],
+        parameters=[config_dict, use_sim_time],
         arguments=["--ros-args", "--log-level", "info"],
     )
 
-
+    # Sequence: spawn robot -> joint_state_broadcaster -> arm_trajectory_controller
     delay_joint_state_broadcaster = RegisterEventHandler(
-        OnProcessStart(
-            target_action=controller_manager_node,
-            on_start=[joint_state_broadcaster_spawner],
+        OnProcessExit(
+            target_action=spawn_the_robot,
+            on_exit=[joint_state_broadcaster_spawner],
         )
     )
 
     delay_arm_controller = RegisterEventHandler(
-        OnProcessStart(
+        OnProcessExit(
             target_action=joint_state_broadcaster_spawner,
-            on_start=[arm_trajectory_controller_spawner],
+            on_exit=[arm_trajectory_controller_spawner],
         )
     )
 
@@ -157,21 +151,16 @@ def generate_launch_description():
         )
     )
 
-
     # Launch Description
     ld.add_action(x_arg)
     ld.add_action(y_arg)
     ld.add_action(z_arg)
     ld.add_action(gazebo)
-    ld.add_action(controller_manager_node)  # has to be loaded first
-    ld.add_action(spawn_the_robot)
     ld.add_action(robot_state_publisher)
-    ld.add_action(move_group_node)
-    # delay of the controllers
+    ld.add_action(spawn_the_robot)
     ld.add_action(delay_joint_state_broadcaster)
     ld.add_action(delay_arm_controller)
+    ld.add_action(move_group_node)
     ld.add_action(delay_rviz_node)
-
-
 
     return ld

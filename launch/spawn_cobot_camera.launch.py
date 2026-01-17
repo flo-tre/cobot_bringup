@@ -34,6 +34,7 @@ from launch.actions import (
     IncludeLaunchDescription,
     OpaqueFunction,
     RegisterEventHandler,
+    ExecuteProcess,
 )
 from launch.conditions import IfCondition, UnlessCondition
 from launch.event_handlers import OnProcessExit
@@ -132,9 +133,9 @@ def launch_setup(context, *args, **kwargs):
         package="controller_manager",
         executable="spawner",
         arguments=["joint_state_broadcaster", "--controller-manager", "/controller_manager"],
+        output="screen",
     )
 
-    # Delay rviz start after `joint_state_broadcaster`
     delay_rviz_after_joint_state_broadcaster_spawner = RegisterEventHandler(
         event_handler=OnProcessExit(
             target_action=joint_state_broadcaster_spawner,
@@ -143,47 +144,61 @@ def launch_setup(context, *args, **kwargs):
         condition=IfCondition(launch_rviz),
     )
 
-    # There may be other controllers of the joints, but this is the initially-started one
     initial_joint_controller_spawner_started = Node(
         package="controller_manager",
         executable="spawner",
         arguments=[initial_joint_controller, "-c", "/controller_manager"],
         condition=IfCondition(start_joint_controller),
+        output="screen",
     )
     initial_joint_controller_spawner_stopped = Node(
         package="controller_manager",
         executable="spawner",
         arguments=[initial_joint_controller, "-c", "/controller_manager", "--stopped"],
         condition=UnlessCondition(start_joint_controller),
+        output="screen",
     )
 
-    # Gazebo nodes
+    # Gazebo (Classic) via gazebo_ros
     gazebo = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            [FindPackageShare("gazebo_ros"), "/launch", "/gazebo.launch.py"]
-        ),
-        launch_arguments={
-            "gui": gazebo_gui,
-        }.items(),
+        PythonLaunchDescriptionSource([FindPackageShare("gazebo_ros"), "/launch", "/gazebo.launch.py"]),
+        launch_arguments={"gui": gazebo_gui}.items(),
     )
 
-    # Spawn robot
+    # Spawn robot (increase timeout)
     gazebo_spawn_robot = Node(
         package="gazebo_ros",
         executable="spawn_entity.py",
         name="spawn_ur",
-        arguments=["-entity", "ur", "-topic", "robot_description"],
+        arguments=["-entity", "ur", "-topic", "robot_description", "-timeout", "120"],
         output="screen",
+    )
+
+    # Sequence: spawn robot -> joint_state_broadcaster -> initial_joint_controller(s)
+    delay_joint_state_broadcaster = RegisterEventHandler(
+        OnProcessExit(
+            target_action=gazebo_spawn_robot,
+            on_exit=[joint_state_broadcaster_spawner],
+        )
+    )
+
+    delay_initial_joint_controller = RegisterEventHandler(
+        OnProcessExit(
+            target_action=joint_state_broadcaster_spawner,
+            on_exit=[
+                initial_joint_controller_spawner_stopped,
+                initial_joint_controller_spawner_started,
+            ],
+        )
     )
 
     nodes_to_start = [
         robot_state_publisher_node,
-        joint_state_broadcaster_spawner,
-        delay_rviz_after_joint_state_broadcaster_spawner,
-        initial_joint_controller_spawner_stopped,
-        initial_joint_controller_spawner_started,
         gazebo,
         gazebo_spawn_robot,
+        delay_joint_state_broadcaster,
+        delay_initial_joint_controller,
+        delay_rviz_after_joint_state_broadcaster_spawner,
     ]
 
     return nodes_to_start
