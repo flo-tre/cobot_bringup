@@ -73,7 +73,7 @@ def launch_setup(context, *args, **kwargs):
     )
 
     rviz_config_file = PathJoinSubstitution(
-        [FindPackageShare(description_package), "rviz", "view_cobot_camera.rviz"]
+        [FindPackageShare("cobot_visualization"), "rviz", "view_cobot_camera.rviz"]
     )
 
     robot_description_content = Command(
