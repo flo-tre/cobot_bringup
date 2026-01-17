@@ -150,7 +150,7 @@ def generate_launch_description():
     }
 
     rviz_config_file = PathJoinSubstitution(
-        [FindPackageShare("cobot_vizualization"), "rviz", "view_cobot_camera.rviz"]
+        [FindPackageShare("cobot_visualization"), "rviz", "view_cobot_camera.rviz"]
     )
 
     joint_state_publisher_node = Node(
