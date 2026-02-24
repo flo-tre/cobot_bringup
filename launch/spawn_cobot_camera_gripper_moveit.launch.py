@@ -1,12 +1,9 @@
-from pathlib import Path
-
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler
-from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
-from launch.event_handlers import OnProcessStart, OnProcessExit
-from launch_param_builder import load_xacro
 from launch_ros.actions import Node
+from launch.substitutions import LaunchConfiguration
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.event_handlers import OnProcessStart, OnProcessExit
 from ament_index_python.packages import get_package_share_directory
 import os
 from moveit_configs_utils import MoveItConfigsBuilder
@@ -28,7 +25,7 @@ def generate_launch_description():
         .robot_description(
             file_path="config/cobot.urdf.xacro",
             mappings={
-                "sim_gazebo": "false",
+                "sim_gazebo": "true",
                 "export_mimic_joint_interfaces": "true",
             },
         )
@@ -44,22 +41,6 @@ def generate_launch_description():
         .to_moveit_configs()
     )
 
-    urdf_path = Path(
-        get_package_share_directory("cobot_camera_gripper_moveit_config"),
-        "config",
-        "cobot.urdf.xacro",
-    )
-    gazebo_robot_description = {
-        "robot_description": load_xacro(
-            urdf_path,
-            mappings={
-                "sim_gazebo": "true",
-                "export_mimic_joint_interfaces": "true",
-                "simulation_controllers": joint_controllers_file,
-            },
-        )
-    }
-
     x_arg = DeclareLaunchArgument('x', default_value='0', description='X position of the robot')
     y_arg = DeclareLaunchArgument('y', default_value='0', description='Y position of the robot')
     z_arg = DeclareLaunchArgument('z', default_value='0', description='Z position of the robot')
@@ -71,6 +52,7 @@ def generate_launch_description():
             'debug': 'false',
             'gui': 'true',
             'paused': 'false',
+            #'world' : world_file
         }.items()
     )
 
@@ -95,6 +77,7 @@ def generate_launch_description():
         ],
     )
 
+    # spawn the robot (with increased timeout)
     spawn_the_robot = Node(
         package='gazebo_ros',
         executable='spawn_entity.py',
@@ -108,11 +91,12 @@ def generate_launch_description():
         ],
         output='screen',
     )
-
+    
+    # Robot state publisher
     robot_state_publisher = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
-        parameters=[gazebo_robot_description, use_sim_time],
+        parameters=[moveit_config.robot_description, use_sim_time],
         output='screen'
     )
 
@@ -151,16 +135,11 @@ def generate_launch_description():
         arguments=["--ros-args", "--log-level", "info"],
     )
 
-    from launch.actions import TimerAction
+    # Sequence: spawn robot -> joint_state_broadcaster -> arm_trajectory_controller
     delay_joint_state_broadcaster = RegisterEventHandler(
         OnProcessExit(
             target_action=spawn_the_robot,
-            on_exit=[
-                TimerAction(
-                    period=2.0,
-                    actions=[joint_state_broadcaster_spawner],
-                )
-            ],
+            on_exit=[joint_state_broadcaster_spawner],
         )
     )
 
@@ -178,6 +157,7 @@ def generate_launch_description():
         )
     )
 
+    # Launch Description
     ld.add_action(x_arg)
     ld.add_action(y_arg)
     ld.add_action(z_arg)
