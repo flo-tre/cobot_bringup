@@ -1,16 +1,11 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, ExecuteProcess, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler
 from launch_ros.actions import Node
-from launch.substitutions import LaunchConfiguration, Command
+from launch.substitutions import LaunchConfiguration
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.event_handlers import OnProcessStart
-from launch.event_handlers import OnProcessExit
-from launch.events import TimerEvent
-from launch.actions import TimerAction, ExecuteProcess
+from launch.event_handlers import OnProcessStart, OnProcessExit
 from ament_index_python.packages import get_package_share_directory
 import os
-import xacro
-from launch.event_handlers import OnProcessStart
 from moveit_configs_utils import MoveItConfigsBuilder
 
 def generate_launch_description():
@@ -39,7 +34,6 @@ def generate_launch_description():
         )
         .to_moveit_configs()
     )
-
 
     x_arg = DeclareLaunchArgument('x', default_value='0', description='X position of the robot')
     y_arg = DeclareLaunchArgument('y', default_value='0', description='Y position of the robot')
@@ -117,7 +111,6 @@ def generate_launch_description():
         parameters=[use_sim_time],
     )
 
-    use_sim_time={"use_sim_time": True}
     config_dict = moveit_config.to_dict()
     config_dict.update(use_sim_time)
 
