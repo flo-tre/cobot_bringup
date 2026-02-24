@@ -16,6 +16,7 @@ setup(
             'launch/spawn_cobot_camera_moveit.launch.py',
             'launch/view_cobot_camera_gripper.launch.py',
             'launch/spawn_cobot_camera_gripper.launch.py',
+            'launch/spawn_cobot_camera_gripper_moveit.launch.py',
         ]),
         ('share/' + package_name + '/config', [
             'config/cobot_controllers.yaml',
