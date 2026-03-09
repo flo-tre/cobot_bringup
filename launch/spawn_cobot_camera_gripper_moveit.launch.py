@@ -1,9 +1,9 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler, ExecuteProcess, TimerAction
 from launch_ros.actions import Node
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, Command, FindExecutable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.event_handlers import OnProcessStart, OnProcessExit
+from launch.event_handlers import OnProcessExit, OnShutdown
 from ament_index_python.packages import get_package_share_directory
 import os
 from moveit_configs_utils import MoveItConfigsBuilder
@@ -41,9 +41,34 @@ def generate_launch_description():
         .to_moveit_configs()
     )
 
+    cleaned_robot_description = {
+        "robot_description": Command(
+            [
+                FindExecutable(name="python3"),
+                " -m cobot_bringup.strip_xacro_comments ",
+                os.path.join(
+                    get_package_share_directory("cobot_camera_gripper_moveit_config"),
+                    "config",
+                    "cobot.urdf.xacro",
+                ),
+                " sim_gazebo:=true",
+            ]
+        )
+    }
+
     x_arg = DeclareLaunchArgument('x', default_value='0', description='X position of the robot')
     y_arg = DeclareLaunchArgument('y', default_value='0', description='Y position of the robot')
     z_arg = DeclareLaunchArgument('z', default_value='0', description='Z position of the robot')
+
+    # Optional pre-clean to recover from stale Gazebo processes that survived a previous run.
+    cleanup_stale_gazebo = ExecuteProcess(
+        cmd=[
+            'bash',
+            '-c',
+            'pkill -9 -x gzserver || true; pkill -9 -x gzclient || true; pkill -9 -x gazebo || true; sleep 2'
+        ],
+        output='screen',
+    )
 
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(gazebo_launch_file),
@@ -69,7 +94,7 @@ def generate_launch_description():
         output="screen",
         arguments=["-d", rviz_config_path],
         parameters=[
-            moveit_config.robot_description,
+            cleaned_robot_description,
             moveit_config.robot_description_semantic,
             moveit_config.planning_pipelines,
             moveit_config.robot_description_kinematics,
@@ -96,7 +121,7 @@ def generate_launch_description():
     robot_state_publisher = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
-        parameters=[moveit_config.robot_description, use_sim_time],
+        parameters=[cleaned_robot_description, use_sim_time],
         output='screen'
     )
 
@@ -125,6 +150,7 @@ def generate_launch_description():
     )
 
     config_dict = moveit_config.to_dict()
+    config_dict.update(cleaned_robot_description)
     config_dict.update(use_sim_time)
 
     move_group_node = Node(
@@ -146,14 +172,48 @@ def generate_launch_description():
     delay_arm_controller = RegisterEventHandler(
         OnProcessExit(
             target_action=joint_state_broadcaster_spawner,
-            on_exit=[arm_trajectory_controller_spawner, gripper_position_controller_spawner],
+            on_exit=[arm_trajectory_controller_spawner],
         )
     )
 
-    delay_rviz_node = RegisterEventHandler(
-        OnProcessStart(
-            target_action=robot_state_publisher,
-            on_start=[rviz_node],
+    delay_gripper_controller = RegisterEventHandler(
+        OnProcessExit(
+            target_action=arm_trajectory_controller_spawner,
+            on_exit=[gripper_position_controller_spawner],
+        )
+    )
+
+    delay_moveit_stack = RegisterEventHandler(
+        OnProcessExit(
+            target_action=gripper_position_controller_spawner,
+            on_exit=[
+                TimerAction(period=2.0, actions=[move_group_node, rviz_node]),
+            ],
+        )
+    )
+    cleanup_on_shutdown = RegisterEventHandler(
+        OnShutdown(
+            on_shutdown=[
+                ExecuteProcess(
+                    cmd=[
+                        'bash',
+                        '-c',
+                        'pkill -9 -x gzserver || true; pkill -9 -x gzclient || true; pkill -9 -x gazebo || true'
+                    ],
+                    output='screen',
+                )
+            ]
+        )
+    )
+
+    startup_after_cleanup = RegisterEventHandler(
+        OnProcessExit(
+            target_action=cleanup_stale_gazebo,
+            on_exit=[
+                gazebo,
+                robot_state_publisher,
+                spawn_the_robot,
+            ],
         )
     )
 
@@ -161,12 +221,12 @@ def generate_launch_description():
     ld.add_action(x_arg)
     ld.add_action(y_arg)
     ld.add_action(z_arg)
-    ld.add_action(gazebo)
-    ld.add_action(robot_state_publisher)
-    ld.add_action(spawn_the_robot)
+    ld.add_action(cleanup_stale_gazebo)
+    ld.add_action(startup_after_cleanup)
     ld.add_action(delay_joint_state_broadcaster)
     ld.add_action(delay_arm_controller)
-    ld.add_action(move_group_node)
-    ld.add_action(delay_rviz_node)
+    ld.add_action(delay_gripper_controller)
+    ld.add_action(delay_moveit_stack)
+    ld.add_action(cleanup_on_shutdown)
 
     return ld
